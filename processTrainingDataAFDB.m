@@ -45,6 +45,19 @@ disp(['Got ' int2str(non_af_sequences) ' non-AF sequences.']);
 % Got 8546 AF sequences.
 % Got 11531 non-AF sequences.
 
+% Export annotations for training data
+% PS: RR intervals are in samples!!!!!
+tb_var_names = {'Filename', 'Record', 'AnnType'};
+file_id = arrayfun(@(x) int2str(x), 1:1:length(afdb_train_data), 'UniformOutput', false);
+ann_train_data = table(file_id(:), afdb_train_data(:,1), afdb_train_data(:,2), 'VariableNames', tb_var_names);
+writetable(ann_train_data, 'training_dat/annotations.csv');
+% Write RR intervals as .dat files in training data folder
+for f = 1:length(afdb_train_data)
+	% This for loop is time consuming...
+	%FIXME: Improve storage of training data
+	writematrix(afdb_train_data{f,3}, ['training_dat/' file_id{f} '.dat']);
+end
+
 %% --------------- FUNCTIONS --------------- %%
 
 %% rrLabel: function description
