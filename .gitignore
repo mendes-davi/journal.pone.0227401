@@ -1,6 +1,9 @@
 # Dataset folder
 afdb
 
+# Training data folder
+training_dat
+
 # MATLAB OSX / *nix default autosave extension
 *.m~
 

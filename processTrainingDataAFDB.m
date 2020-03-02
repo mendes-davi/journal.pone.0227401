@@ -1,4 +1,5 @@
 clear all; close all;
+addpath('utils/');
 
 %% --- AFDB DATASET --- %%
 %% Easily download the required dataset into afdb folder using:
@@ -13,51 +14,83 @@ dataset_path = 'afdb/';
 [rec, qrs_ann, dat_rec] = getDatasetFiles(dataset_path);
 nrecords = length(rec);
 
-%% Load atr & qrs annotations
+% Import Data and get RR Intervals according to ann_type
 qrs = cell(nrecords, 1);
 ann = cell(nrecords, 2);
+rr_sets = cell(nrecords, 1);
 for n = 1:nrecords
+	%% Load atr & qrs annotations
 	qrs{n} = rdann([dataset_path rec{n}], qrs_ann{n});
 	[ann{n,1}, ~, ~, ~, ~, ann{n,2}] = rdann([dataset_path rec{n}], 'atr');
+	%% Get RR sets (per annotation) for each recording
+	[rr_sets{n}] = ann2RR(qrs{n}, ann{n,1});
 end
+
+% Split RR training data
+rr_set_size = 60; % group RR intervals in sets of 60 samples each
+% afdb_train_data:
+% 1st col: record associated with RR interval
+% 2nd col: annotation for RR interval
+% 3rd col: array of RR interval
+[afdb_train_data] = rrLabel(rr_sets, ann(:,2), rec, rr_set_size);
+
+% ...
+% According to the paper:
+% The MITBIH-AF database yielded 7,744 consecutive 60 beat sequences of AF, and 10,467 non-AF
+af_sequences = length(find(strcmp(afdb_train_data(:,2), '(AFIB')));
+non_af_sequences = length(afdb_train_data) - af_sequences;
+disp(['Got ' int2str(af_sequences) ' AF sequences.']);
+disp(['Got ' int2str(non_af_sequences) ' non-AF sequences.']);
+% My results:
+% Got 8546 AF sequences.
+% Got 11531 non-AF sequences.
 
 %% --------------- FUNCTIONS --------------- %%
 
-%% getDatasetFiles: function description
-function [rec_names, qrs_annotator, dat] = getDatasetFiles(dataset_path)
-	% Ann Extensions
-	ann_ext = {'.atr', '.qrs', '.qrsc', '.dat'};
-	% Get Folder Information
-	dir_info = dir(dataset_path);
-	records = {dir_info.name};
-	records = records(find([dir_info.isdir] == 0));
-	
-	% Filter Names and Extensions
-	[~, rec_names, rec_ext] = cellfun(@(rec) fileparts(rec), records, 'UniformOutput', false);	
-	rec_names = rec_names(find(contains(rec_ext,ann_ext) == 1));
-	rec_names = unique(rec_names); % List of unique names for the dataset
-	assert(isequal(length(rec_names), 25), 'Records are missing in the local afdb folder!');
-	records = records(find(contains(rec_ext,ann_ext) == 1));
-	
-	% Get qrs_annotator
-	qrs_annotator = cell(1, length(rec_names));
-	dat = zeros(1, length(rec_names));
-	for r = 1:length(rec_names)
-		% Check if .dat file exists for the recording
-		dat(r) = any(strcmp([rec_names{r} '.dat'], records));
-		% Assert for .atr file
-		atr_file = any(strcmp([rec_names{r} ann_ext{1}], records));
-		assert(atr_file, ['atr annotation file is missing for: ' rec_names{r}]);
-		% Assert for .qrs file
-		qrs_file = find(strcmp([rec_names{r} ann_ext{2}], records));
-		assert(~isempty(qrs_file), ['qrs annotation file is missing for: ' rec_names{r}]);
-		qrsc_file = find(strcmp([rec_names{r} ann_ext{3}], records));
-		% For some records, manually corrected beat annotation files are available
-		% (with the suffix .qrsc)
-		if ~isempty(qrsc_file)
-			qrs_annotator{r} = 'qrsc';
-		else
-			qrs_annotator{r} = 'qrs';
+%% rrLabel: function description
+function [rr_split_sets] = rrLabel(rr_sets, ann_type, rec, rr_set_size)
+	rr_split_sets = {};
+
+	% Iterate over all records
+	nrecords = length(rr_sets);
+	for n = 1:nrecords
+		% Get RR intervals for each record
+		rr_data = rr_sets{n};
+
+		% Iterate over all rhythm annotations
+		nsets = length(rr_sets{n});
+		for s = 1:nsets
+			% Length of RR intervals per annotation
+			rr_length = length(rr_data{s});
+			% Check if the RR Set length if larger than rr_set_size
+			ndat = floor(rr_length/rr_set_size);
+			if ndat > 0
+				% Reshape RR data
+				rr_data{s} = reshape(rr_data{s}(1:ndat*rr_set_size), [rr_set_size ndat]);
+
+				% Iterate for each piece RR Split Set
+				for d = 1:ndat
+					% Append to rr_split_sets
+					rr_split_sets{end+1, 1} = rec{n};
+					rr_split_sets{end, 2} = ann_type{n}{s};
+					rr_split_sets{end, 3} = rr_data{s}(:,d);
+				end
+			end
 		end
 	end	
+end
+
+%% ann2RR: function description
+function [rr_sets] = ann2RR(qrs, ann)
+	% For each ann_type split qrs points based on ann values into sets
+	rr_sets = cell(1, length(ann));
+	for n = 1:length(ann)
+		if ~isequal(n,length(ann))
+			rr_sets{n} = qrs(find(qrs >= ann(n) & qrs <= ann(n+1)));
+		else % The last annotation ends with the last QRS of the record
+			rr_sets{n} = qrs(find(qrs >= ann(n))); 
+		end
+	end
+	% Get RR Intervals for each QRS set
+	rr_sets = cellfun(@(d) diff(d(:)), rr_sets, 'UniformOutput', false);
 end
